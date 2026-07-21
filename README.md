@@ -347,6 +347,20 @@ Use the Vercel MCP, not assumptions. Inspect the project, latest deployment, ali
 
 Observed symptom: Vercel reported `READY`, the Next.js build emitted `/`, the production domain showed **Valid Configuration**, and deployment metadata listed the expected aliases—yet the public URL returned a platform-level 404 with `x-vercel-error: NOT_FOUND`.
 
+Resolution in this project: the Root Directory was already correct. The app's `package.json`, `app/`, `public/`, and `next.config.ts` all live at repository root, so Vercel's Root Directory field should be left empty (the UI placeholder is `./`). The actual fault was **Framework Preset = Other**. Vercel could execute `npm run build`, but the project metadata remained `framework: null`, and every alias returned the platform 404. Changing Project → Settings → Build and Deployment → Framework Preset to **Next.js**, leaving Build Command and Output Directory on Next.js defaults, saving, and triggering a fresh Git deployment changed the MCP result to `framework: "nextjs"`. The production URL then returned HTTP 200 with `x-matched-path: /`.
+
+The verified settings are:
+
+```text
+Framework Preset: Next.js
+Root Directory:   empty (repository root / ./)
+Build Command:    Next.js default
+Output Directory: Next.js default
+Install Command:  automatic
+```
+
+Do not set Root Directory to `/`, `app`, or another guessed folder for this repository. `app/` is a Next.js routing directory, not a standalone deployable frontend root; `package.json` must remain visible from the configured project root.
+
 This is different from an application 404. An application 404 usually renders the app's own not-found page and reaches runtime or static output. A platform `NOT_FOUND` arrives directly from Vercel before the app runs.
 
 Diagnostic checklist:

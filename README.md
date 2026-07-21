@@ -419,6 +419,155 @@ Record these values without exposing secrets:
 
 That evidence lets an AI assistant or Vercel Support distinguish a code problem from an authentication, Git connection, alias, or edge-routing problem quickly.
 
+## Mistakes we made—and how to avoid them
+
+This retrospective matters as much as the happy path. The project eventually worked, but several choices created avoidable loops.
+
+### We treated “committed” as “published”
+
+What happened: the project had a clean local commit, but no GitHub remote. Saying the repo was ready before confirming `origin` and reading the remote repository overstated progress.
+
+Do better:
+
+- Treat local Git, GitHub, Vercel Git integration, and the live deployment as four separate checkpoints.
+- Require evidence for each: local SHA, remote URL, Vercel source SHA, and HTTP 200.
+- Use `git remote -v` before attempting any push.
+
+### We assumed a Chrome login authenticated command-line Git
+
+What happened: GitHub was signed in inside Chrome, while `gh` contained an invalid credential and Git had no working credential helper. Repeating an HTTPS push could never succeed until those credential stores were reconciled.
+
+Do better:
+
+- Run `gh auth status` before creating the remote workflow.
+- Use one deliberate device-authentication flow.
+- Configure the repository-local credential helper when global Git configuration is unavailable.
+- Remember that Chrome, GitHub Desktop, GitHub CLI, SSH, and Git credential helpers are independent.
+
+### We started more than one device-authorization flow
+
+What happened: multiple pending one-time codes made it harder to tell which browser page belonged to which command-line process. Filling segmented code boxes incorrectly also caused valid-looking codes to be rejected.
+
+Do better:
+
+- Keep exactly one device flow active.
+- Cancel stale terminal sessions before requesting a new code.
+- Verify each segmented input visibly before submitting.
+- Never ask an AI agent to handle passkeys, passwords, or 2FA; hand those steps to the account owner.
+
+### We tried SSH without first checking whether SSH was configured
+
+What happened: an SSH fallback failed because there was no usable GitHub SSH key and the environment could not create the expected SSH files.
+
+Do better:
+
+- Run a read-only SSH authentication check before changing the remote protocol.
+- Prefer the already chosen HTTPS + GitHub CLI flow unless a working SSH key is confirmed.
+- Do not add authentication strategies merely because the first one needs repair.
+
+### We deployed before GitHub was the source of truth
+
+What happened: the first successful Vercel deployment came from a direct deployment operation. The site existed on Vercel, but the project was not connected to the GitHub repository, so future pushes could not deploy automatically.
+
+Do better:
+
+- For a teaching repository, create and push GitHub first.
+- Import or connect that repository in Vercel before the first production build.
+- Confirm the deployment Source shows GitHub, branch, and commit SHA—not merely `vercel deploy`.
+
+### We connected Git after the commit and expected an automatic deployment
+
+What happened: connecting an existing repository did not replay the old commit.
+
+Do better:
+
+- After connecting Git, create one explicit trigger commit or use Vercel's redeploy control.
+- Verify that the new deployment metadata includes `githubCommitSha`, `githubCommitRef`, and `source: git`.
+
+### We focused on aliases and protection before checking the framework preset
+
+What happened: the strongest early clue was `framework: null`, but we spent time re-saving aliases and investigating Deployment Protection. Those were reasonable checks, but the project was visibly configured as **Other** while the source was plainly Next.js.
+
+Do better:
+
+- Compare Vercel project metadata to `package.json` immediately.
+- If the app is Next.js and MCP reports `framework: null`, inspect Framework Preset before touching aliases.
+- Use this order: project root → framework preset → build/output defaults → build logs → deployment state → alias → protection → HTTP response.
+
+### We nearly blamed the Root Directory without comparing it to the repository
+
+What happened: a common Vercel failure is pointing Root Directory at the wrong frontend folder. In this repository, however, `package.json`, `app/`, `public/`, and `next.config.ts` were already at root. Setting Root Directory to `/`, `app`, or an invented frontend folder would have made the configuration worse.
+
+Do better:
+
+- Inspect the repository tree first.
+- Root Directory is the folder containing the deployable app's `package.json`, not the Next.js `app/` route directory.
+- Leave Root Directory empty when the deployable application is at repository root.
+
+### We trusted `READY` too much
+
+What happened: Vercel marked deployments Ready and build logs showed `/`, but the public URL still returned a platform-level 404. `READY` means the build output was accepted, not that every production access path is correct.
+
+Do better:
+
+- Make a real HTTP request after every production deployment.
+- Inspect `x-vercel-error`, `x-vercel-id`, and `x-matched-path`.
+- Do not call deployment complete until the intended hostname returns the expected page.
+
+### We treated a favicon warning as if it might explain the deployment
+
+What happened: `/favicon.ico` returned 404. That browser-console warning was unrelated to the platform-level 404 for `/`.
+
+Do better:
+
+- Separate primary route failures from secondary asset warnings.
+- Fix the root document first; then clean up icons, source maps, analytics, and other non-blocking assets.
+- In this project, `/favicon.svg` is the declared icon; a browser request for `/favicon.ico` is cosmetic.
+
+### We used an old share link after deployment state changed
+
+What happened: a temporary protection-bypass URL was created for an earlier deployment state. Reusing it after aliases and protection changed did not prove the newest deployment worked.
+
+Do better:
+
+- Generate bypass links only for the exact current deployment when protection is intentionally enabled.
+- Prefer the normal production URL after protection is disabled.
+- Record which deployment ID a temporary link was created for and its expiry.
+
+### We did not identify the source-of-truth contradiction soon enough
+
+What happened: build logs said Next.js, while project metadata said `framework: null`. That contradiction was more actionable than repeatedly refreshing the alias.
+
+Do better:
+
+- Build a small evidence table before changing settings:
+
+| Layer | Expected | Observed before fix | Observed after fix |
+| --- | --- | --- | --- |
+| Repository root | `package.json` at root | Correct | Correct |
+| Framework | `nextjs` | `null` / Other | `nextjs` |
+| Build route | `/` | Present | Present |
+| Deployment | `READY` | `READY` | `READY` |
+| Alias error | none | null | null |
+| Production HTTP | 200 | platform 404 | 200 |
+
+The row that differs from expectation is usually the best next action.
+
+### A better end-to-end order
+
+Use this sequence next time:
+
+1. Inspect the repository tree and decide the true application root.
+2. Run lint and production build locally.
+3. Initialize Git, commit, create GitHub, attach `origin`, push, and verify the remote SHA.
+4. Create or import the Vercel project from that GitHub repository.
+5. Confirm Framework Preset and Root Directory before deploying.
+6. Add production environment variables without exposing values.
+7. Deploy from Git and verify build logs, route output, source SHA, and aliases.
+8. Test the public production hostname for HTTP 200.
+9. Test interaction, responsiveness, console, and persistent writes.
+10. Only then announce completion and record the evidence in the playbook.
+
 ## License
 
 Use the code as a learning project. Confirm rights for names, claims, photographs, and packaging before commercial use.
